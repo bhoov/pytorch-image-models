@@ -1,0 +1,12 @@
+name: timm
+channels:
+  - conda-forge
+  - anaconda
+dependencies:
+  - pip>=20.0.0
+  - python=3.9
+  - jedi=0.17.2
+  - matplotlib
+  - nb_conda
+  - pip:
+    - pyyaml

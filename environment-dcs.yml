@@ -1,0 +1,24 @@
+name: timm
+channels:
+  - conda-forge
+  - anaconda
+dependencies:
+  - numpy 
+  - ninja 
+  - pyyaml 
+  - setuptools 
+  - cmake 
+  - cffi 
+  - typing_extensions 
+  - future 
+  - six 
+  - requests 
+  - dataclasses 
+  - ffmpeg
+  - libtiff 
+  - jpeg 
+  - libwebp 
+  - tk 
+  - openjpeg
+  - zlib 
+  - freetype

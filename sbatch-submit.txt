@@ -1,0 +1,1 @@
+python distributed_train.py 6 ~/scratch-shared/datasets/imagenet1k --model vit_base_patch16_224 --output ~/scratch/timmlogs/ --experiment tmp1 --workers 55 --pin-mem --mixup 0.8 --cutmix 1. --reprob 0.25 --warmup-epochs 5 --sched cosine --opt adamw --aa rand 
