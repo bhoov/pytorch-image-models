@@ -7,6 +7,7 @@ conda activate timm
 pip install -e .
 pip install einops
 pip install tqdm
+pip install pytorch-lightning
 ```
 
 Then we need to manually setup pytorch for the cluster.

@@ -199,7 +199,7 @@ class EnergyVisionTransformer(nn.Module):
             self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, global_pool='token',
             embed_dim=768, depth=12, num_heads=12, mlp_ratio=4., qkv_bias=True, init_values=None,
             class_token=True, weight_init='', fc_norm=True,
-            embed_layer=PatchEmbed, norm_layer=EnergyLayerNorm, act_layer=None, block_fn=KQEnergyBlock):
+            embed_layer=PatchEmbed, norm_layer=EnergyLayerNorm, act_layer=None, block_fn=KQEnergyBlock, *, drop_rate=0):
         """
         Args:
             img_size (int, tuple): input image size
@@ -236,6 +236,7 @@ class EnergyVisionTransformer(nn.Module):
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
+        # self.cls_token = nn.Parameter(torch.randn(1, 1, embed_dim) * 0.02) if self.num_tokens > 0 else None
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) if self.num_tokens > 0 else None
         self.pos_embed = nn.Parameter(torch.randn(1, num_patches + self.num_tokens, embed_dim) * .02)
 
@@ -295,7 +296,7 @@ class EnergyVisionTransformer(nn.Module):
         
     def descend_block(self, x, depth:int=12, alpha:float=0.1):
         for i in range(depth):
-            self.step_block(x, alpha=alpha)
+            x = self.step_block(x, alpha=alpha)
         return x
 
     def forward_features(self, x, alpha:float=0.1):
