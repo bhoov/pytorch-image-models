@@ -5,3 +5,4 @@ einops
 setuptools==59.5.0
 tqdm
 pytorch-lightning
+submitit

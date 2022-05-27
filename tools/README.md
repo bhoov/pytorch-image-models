@@ -20,7 +20,7 @@ python3 tools/aimos_submit.py --nodes 8 --ngpus 6 -d 1 --wd /gpfs/u/home/SIFA/SI
 - No pretrained model currently
 
 ```
-python3 tools/aimos_submit.py --nodes 8 --ngpus 6 -d 1 --wd /gpfs/u/home/DAMT/DAMThvrb/Projects/timm --suffix 00 --job_dir checkpoint/TDCS --model et_base_patch16_224 " /gpfs/u/home/DAMT/DAMThvrb/scratch-shared/datasets/imagenet1k --dataset imagenet --opt adamw --lr 1e-4 --epochs 300 --sched cosine --batch-size 16 --warmup-epochs 5 --mixup 0.8 --cutmix 1.0 --drop-path 0.0"
+python3 tools/aimos_submit.py --nodes 8 --ngpus 6 -d 1 --wd /gpfs/u/home/DAMT/DAMThvrb/Projects/timm --suffix 00 --job_dir checkpoint/TDCS --model et_base_patch16_224 " /gpfs/u/home/DAMT/DAMThvrb/scratch-shared/datasets/imagenet1k --dataset imagenet --opt adamw --lr 5e-4 --epochs 300 --sched cosine --batch-size 16 --warmup-epochs 5 --mixup 0.8 --cutmix 1.0 --drop-path 0.0"
 ```
 
 By default, this command looks for a `main.py` script in the `wd`. This `main.py` takes a lot of arguments similarly to the `train.py` of timm
