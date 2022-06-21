@@ -14,7 +14,8 @@ import submitit
 
 def parse_args():
     classification_parser = classification.get_args_parser()
-    parser = argparse.ArgumentParser("Submitit for DeiT", parents=[classification_parser])
+    parser = argparse.ArgumentParser("Submitit for DeIT, repurposed for ET", parents=[classification_parser])
+    parser.add_argument("--name", default="deit", type=str, help="Name of the job")
     parser.add_argument("--ngpus", default=6, type=int, help="Number of gpus to request on each node")
     parser.add_argument("--nodes", default=2, type=int, help="Number of nodes to request")
     parser.add_argument("--timeout", default=360, type=int, help="Duration of the job")
@@ -114,7 +115,7 @@ def main():
         **kwargs
     )
 
-    executor.update_parameters(name="deit")
+    executor.update_parameters(name=args.name)
 
     args.dist_url = get_init_file().as_uri()
     args.output_dir = args.job_dir

@@ -185,8 +185,8 @@ class KQEnergyBlock(nn.Module):
     def forward(self, g, alpha=0.1):
         return self.attn(g) + self.chn(g)
 
-    def energy(self, x):
-        return self.attn.energy(x) + self.chn.energy(x).sum(-1)
+    def energy(self, g):
+        return self.attn.energy(g) + self.chn.energy(g).sum(-1)
 
 
 class EnergyVisionTransformer(nn.Module):
@@ -199,7 +199,9 @@ class EnergyVisionTransformer(nn.Module):
             self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, global_pool='token',
             embed_dim=768, depth=12, num_heads=12, mlp_ratio=4., qkv_bias=True, init_values=None,
             class_token=True, weight_init='', fc_norm=True,
-            embed_layer=PatchEmbed, norm_layer=EnergyLayerNorm, act_layer=None, block_fn=KQEnergyBlock, *, drop_rate=0):
+            embed_layer=PatchEmbed, norm_layer=EnergyLayerNorm, act_layer=None, block_fn=KQEnergyBlock, *,
+        # The following are unused and kept for backwards compatibility
+        drop_rate=0, drop_path_rate=0):
         """
         Args:
             img_size (int, tuple): input image size

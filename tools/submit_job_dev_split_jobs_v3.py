@@ -11,7 +11,7 @@ parser.add_argument('--num_jobs', default=1, type=int, help='number of sub_jobs'
 parser.add_argument('-d', '--num_deps', default=1, type=int, help='number of consecutive jobs')
 parser.add_argument('-j', '--job_name', default='my_job', help='job name and log name prefix')
 parser.add_argument('-t', '--time', default=6, type=int, help='hours')
-parser.add_argument('--bb', action='store_true', help='request burst buffer')
+parser.add_argument('--bb', action='store_true', help='request burst buffer. Unsupported for my training')
 parser.add_argument('--wd', default=os.getcwd(), type=str, help='root of working directory')
 parser.add_argument('cmd', help='whole command, quoted by ""', metavar='CMD', nargs='+')
 
@@ -111,10 +111,12 @@ def main():
 #SBATCH -e {log_path}/my_job_%j.err
 #SBATCH --gres=gpu:{num_gpus}{with_bb}
 #SBATCH --nodes={num_nodes}
-#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-gpu=10
 #SBATCH --time=0{time}:00:00
 #SBATCH -p {partition}
 {dependency}
+echo NODELIST
+echo $SLURM_JOB_NODELIST
 
 # SLURM_NPROCS and SLURM_NTASK_PER_NODE env variables are set by the SBATCH directive nodes, ntasks-per-node above.
 if [ \"x$SLURM_NPROCS\" = \"x\" ]
@@ -175,6 +177,10 @@ cd {wd}
         p = subprocess.Popen(['sbatch', script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
         stdout = stdout.decode("utf-8")
+        print("STDout: ", stdout)
+        stderr = stderr.decode("utf-8")
+        print("STDerr: ", stderr)
+
         job_id = stdout.split(" ")[-1]
         print(f"Job {job_id.strip()} is submitted.")
 

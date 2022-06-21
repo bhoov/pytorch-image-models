@@ -7,6 +7,7 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import json
+import os
 
 from pathlib import Path
 
@@ -155,6 +156,7 @@ def get_args_parser():
                         choices=['kingdom', 'phylum', 'class', 'order', 'supercategory', 'family', 'genus', 'name'],
                         type=str, help='semantic granularity')
 
+    parser.add_argument('--gpu', type=str, default="0,1,2,3,4,5")
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
@@ -180,6 +182,7 @@ def get_args_parser():
 
 
 def main(args):
+    print("Initializing distributed...")
     utils.init_distributed_mode(args)
 
     print(args)
@@ -203,6 +206,9 @@ def main(args):
     if True:  # args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()
+        print("Global rank: ", global_rank)
+        print("Environ: ", [k for k in os.environ.keys() if "SLURM_" in k])
+        # device = torch.device(global_rank % 6)
         if args.repeated_aug:
             sampler_train = RASampler(
                 dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
@@ -467,13 +473,12 @@ def main(args):
                 f.write(json.dumps(log_stats) + "\n")
 
     total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
-
-
-if __name__ == '__main__':
     parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    main(args)
+
+if __name__ == "__main__":
+    args = get_args_parser().parse_args()
     main(args)
