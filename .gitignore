@@ -3,6 +3,9 @@ checkpoint/
 lightning_logs/
 *.ckpt
 _archive
+slurm_*.out
+slurm_*.err
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
