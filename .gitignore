@@ -1,6 +1,8 @@
 .*.swp
 checkpoint/
 lightning_logs/
+*.ckpt
+_archive
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

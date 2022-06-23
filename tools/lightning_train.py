@@ -35,7 +35,10 @@ from timm.loss import *
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler
 from timm.utils import ApexScaler, NativeScaler
-from pytorch_lightning.plugins.environments import SLURMEnvironment
+from pytorch_lightning.plugins.environments.slurm_environment import SLURMEnvironment
+from pytorch_lightning.loggers import TensorBoardLogger
+
+
 
 config_parser = parser = argparse.ArgumentParser(description='Training Config', add_help=False)
 parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
@@ -396,7 +399,7 @@ class LitTimm(pl.LightningModule):
             args.train_interpolation = data_config['interpolation']
 
         args.distributed = False
-        # if 'WORLD_SIZE' in os.environ:
+            
         #     args.distributed = int(os.environ['WORLD_SIZE']) > 1
         # args.device = 'cuda:0'
         # args.world_size = 1
@@ -540,7 +543,7 @@ class LitTimm(pl.LightningModule):
     
     def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
         pass
-        # I will call this manually in `validation_epoch_end`
+        # I call this manually in `validation_epoch_end`
         # scheduler.step(epoch=self.current_epoch, metric=metric[self.args.eval_metric])  # timm's scheduler need the epoch value
         
     def training_step(self, batch, batch_idx):
@@ -566,8 +569,32 @@ class LitTimm(pl.LightningModule):
             "target": torch.argmax(target, dim=-1)
         }
     
+#     def training_step_end(self, batch_parts):
+#         try:
+#             acc1 = torch.mean(torch.stack(batch_parts["acc1"]))
+#             acc5 = torch.mean(torch.stack(batch_parts["acc5"]))
+#             loss = torch.mean(torch.stack(batch_parts["loss"]))
+#         except TypeError:
+#             # We are dealing with a single tensor and single device
+#             acc1 = batch_parts["acc1"]
+#             acc5 = batch_parts["acc5"] 
+#             loss = batch_parts["loss"]
+#         # predictions from each GPU
+#         predictions = batch_parts["preds"]
+#         # losses from each GPU
+#         losses = batch_parts["loss"]
+        
+#         losses = torch.mean(torch.stack(losses))
+
+#         gpu_0_prediction = predictions[0]
+#         gpu_1_prediction = predictions[1]
+
+#         # do something with both outputs
+#         return (losses[0] + losses[1]) / 2
+    
     def training_epoch_end(self, train_step_outputs):
         acc1, acc5 = [],[]
+        loss = torch.mean(torch.stack([x["loss"] for x in train_step_outputs]))
         for x in train_step_outputs:
             a1, a5 = accuracy(x['preds'], x['target'], topk=(1,5))
             acc1.append(a1)
@@ -575,6 +602,7 @@ class LitTimm(pl.LightningModule):
         
         acc1 = torch.mean(torch.stack(acc1))
         acc5 = torch.mean(torch.stack(acc5))
+        self.log("train_loss", loss)
         self.log("train_acc1", acc1)
         self.log("train_acc5", acc5)
     
@@ -638,29 +666,25 @@ class LitTimm(pl.LightningModule):
         self.log("val_acc1", acc1)
         self.log("val_acc5", acc5)
         
-        
-# class AIMOSEnvironment(SLURMEnvironment):
-#     """Cluster environment for training on AIMOS which is managed by SLURM.
-
-#     Args:
-#         auto_requeue: Whether automatic job resubmission is enabled or not. How and under which conditions a job gets
-#             rescheduled gets determined by the owner of this plugin.
-#     """
-
-#     def global_rank(self) -> int:
-#         global_rank = self.node_rank() * self.gpus_per_node + self.local_rank()
-#         return global_rank
-
-#     def gpus_per_node(self) -> int:
-#         return int(os.environ["SLURM_GPUS_PER_NODE"])
+class AIMOSEnvironment(SLURMEnvironment):
+    """Cluster environment for training on a cluster managed by SLURM. Modified for AIMOS SLURM weirdness
+    """
+    def world_size(self) -> int:
+        return int(self.num_nodes() * self.gpus_per_node())
     
+    def gpus_per_node(self) -> int:
+        return int(os.environ["SLURM_GPUS_PER_NODE"])
+    
+    def num_nodes(self) -> int:
+        return int(os.environ["SLURM_NNODES"])
         
+    @property
+    def creates_processes_externally(self) -> bool:
+        return True
+    
 def main(args):
     litmodel = LitTimm(args)
-    
-    trainer = pl.Trainer.from_argparse_args(args, limit_train_batches=50, limit_val_batches=10)
-    print(trainer.strategy)
-    # trainer = pl.Trainer(accelerator="gpu", devices=1, overfit_batches=10000, grad_clip_val=0.5) # Test model
+    trainer = pl.Trainer.from_argparse_args(args, limit_train_batches=1000, limit_val_batches=10, val_check_interval=500, gradient_clip_val=0.5)
     trainer.fit(litmodel)
     print("Done")
         

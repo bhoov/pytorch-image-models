@@ -1,0 +1,40 @@
+GPU available: True, used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+Initializing distributed: GLOBAL_RANK: 3, MEMBER: 4/4
+Initializing distributed: GLOBAL_RANK: 1, MEMBER: 2/4
+Initializing distributed: GLOBAL_RANK: 0, MEMBER: 1/4
+Initializing distributed: GLOBAL_RANK: 2, MEMBER: 3/4
+----------------------------------------------------------------------------------------------------
+distributed_backend=nccl
+All distributed processes registered. Starting with 4 processes
+----------------------------------------------------------------------------------------------------
+
+Restoring states from the checkpoint path at /gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/hpc_ckpt_1.ckpt
+/gpfs/u/home/DAMT/DAMThvrb/scratch/miniconda3-ppc/envs/timm/lib/python3.9/site-packages/pytorch_lightning/callbacks/model_checkpoint.py:342: UserWarning: The dirpath has changed from '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1984701/checkpoints' to '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1989097/checkpoints', therefore `best_model_score`, `kth_best_model_path`, `kth_value`, `last_model_path` and `best_k_models` won't be reloaded. Only `best_model_path` will be reloaded.
+  warnings.warn(
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1]
+/gpfs/u/home/DAMT/DAMThvrb/scratch/miniconda3-ppc/envs/timm/lib/python3.9/site-packages/pytorch_lightning/callbacks/model_checkpoint.py:342: UserWarning: The dirpath has changed from '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1984701/checkpoints' to '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1989097/checkpoints', therefore `best_model_score`, `kth_best_model_path`, `kth_value`, `last_model_path` and `best_k_models` won't be reloaded. Only `best_model_path` will be reloaded.
+  warnings.warn(
+/gpfs/u/home/DAMT/DAMThvrb/scratch/miniconda3-ppc/envs/timm/lib/python3.9/site-packages/pytorch_lightning/callbacks/model_checkpoint.py:342: UserWarning: The dirpath has changed from '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1984701/checkpoints' to '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1989097/checkpoints', therefore `best_model_score`, `kth_best_model_path`, `kth_value`, `last_model_path` and `best_k_models` won't be reloaded. Only `best_model_path` will be reloaded.
+  warnings.warn(
+/gpfs/u/home/DAMT/DAMThvrb/scratch/miniconda3-ppc/envs/timm/lib/python3.9/site-packages/pytorch_lightning/callbacks/model_checkpoint.py:342: UserWarning: The dirpath has changed from '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1984701/checkpoints' to '/gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/lightning_logs/version_1989097/checkpoints', therefore `best_model_score`, `kth_best_model_path`, `kth_value`, `last_model_path` and `best_k_models` won't be reloaded. Only `best_model_path` will be reloaded.
+  warnings.warn(
+LOCAL_RANK: 1 - CUDA_VISIBLE_DEVICES: [0,1]
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1]
+LOCAL_RANK: 1 - CUDA_VISIBLE_DEVICES: [0,1]
+
+  | Name             | Type                    | Params
+-------------------------------------------------------------
+0 | model            | EnergyVisionTransformer | 5.1 M 
+1 | validate_loss_fn | CrossEntropyLoss        | 0     
+2 | train_loss_fn    | SoftTargetCrossEntropy  | 0     
+-------------------------------------------------------------
+5.1 M     Trainable params
+12        Non-trainable params
+5.1 M     Total params
+20.218    Total estimated model params size (MB)
+Restored all states from the checkpoint file at /gpfs/u/scratch/DAMT/DAMThvrb/Projects/timm/tools/hpc_ckpt_1.ckpt
+/gpfs/u/home/DAMT/DAMThvrb/scratch/miniconda3-ppc/envs/timm/lib/python3.9/site-packages/pytorch_lightning/loops/epoch/training_epoch_loop.py:135: UserWarning: You're resuming from a checkpoint that ended before the epoch ended. This can cause unreliable results if further training is done. Consider using an end-of-epoch checkpoint or enabling fault-tolerant training: https://pytorch-lightning.readthedocs.io/en/stable/advanced/fault_tolerant_training.html
+  rank_zero_warn(
