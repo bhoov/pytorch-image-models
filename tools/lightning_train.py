@@ -37,6 +37,7 @@ from timm.scheduler import create_scheduler
 from timm.utils import ApexScaler, NativeScaler
 from pytorch_lightning.plugins.environments.slurm_environment import SLURMEnvironment
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 
 
 
@@ -46,6 +47,8 @@ parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
 
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+
+
 
 # Dataset parameters
 parser.add_argument('data_dir', metavar='DIR',
@@ -61,6 +64,10 @@ parser.add_argument('--dataset-download', action='store_true', default=False,
 parser.add_argument('--class-map', default='', type=str, metavar='FILENAME',
                     help='path to class to idx mapping file (default: "")')
 
+# Experiment parameters
+parser.add_argument("--exp_dir", type=str, default="lightning_logs", help="Where to save the tensorboard logs and checkpoints")
+parser.add_argument("--exp_name", type=str, default=None, help="Name of the experiment. If specified, will be a subfolder in the exp_dir")
+                    
 # Model parameters
 parser.add_argument('--model', default='resnet50', type=str, metavar='MODEL',
                     help='Name of model to train (default: "resnet50"')
@@ -308,22 +315,6 @@ def _parse_args(spec_args=None):
     args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
     return args, args_text
 
-# myargs = [
-#     "/gpfs/u/home/DAMT/DAMThvrb/scratch-shared/datasets/imagenet1k",
-#     "--cutmix", "1.",
-#     "--mixup", "0.8",
-#     "--reprob", "0.5",
-#     "--aa", "rand",
-#     "--train-split", "train",
-#     "--val-split", "val",
-#     "--batch-size", "12",
-#     "--no-prefetcher",
-#     "--pin-mem",
-#     "--num-classes", "1000",
-#     "--model", "et_base_patch16_224",
-# ]
-# args, args_text = _parse_args(myargs)
-
 def get_dataset_train(args):
     return create_dataset(
     args.dataset, root=args.data_dir, split=args.train_split, is_training=True,
@@ -563,34 +554,15 @@ class LitTimm(pl.LightningModule):
         output = self.model(input)
         loss = self.train_loss_fn(output, target)
         
+        if (batch_idx % 100) == 0:
+            self.log("train_loss", loss)
+        
         return {
             "loss": loss,
             "preds": output,
             "target": torch.argmax(target, dim=-1)
         }
-    
-#     def training_step_end(self, batch_parts):
-#         try:
-#             acc1 = torch.mean(torch.stack(batch_parts["acc1"]))
-#             acc5 = torch.mean(torch.stack(batch_parts["acc5"]))
-#             loss = torch.mean(torch.stack(batch_parts["loss"]))
-#         except TypeError:
-#             # We are dealing with a single tensor and single device
-#             acc1 = batch_parts["acc1"]
-#             acc5 = batch_parts["acc5"] 
-#             loss = batch_parts["loss"]
-#         # predictions from each GPU
-#         predictions = batch_parts["preds"]
-#         # losses from each GPU
-#         losses = batch_parts["loss"]
-        
-#         losses = torch.mean(torch.stack(losses))
 
-#         gpu_0_prediction = predictions[0]
-#         gpu_1_prediction = predictions[1]
-
-#         # do something with both outputs
-#         return (losses[0] + losses[1]) / 2
     
     def training_epoch_end(self, train_step_outputs):
         acc1, acc5 = [],[]
@@ -602,7 +574,7 @@ class LitTimm(pl.LightningModule):
         
         acc1 = torch.mean(torch.stack(acc1))
         acc5 = torch.mean(torch.stack(acc5))
-        self.log("train_loss", loss)
+        self.log("train_loss_avg", loss)
         self.log("train_acc1", acc1)
         self.log("train_acc5", acc5)
     
@@ -683,9 +655,33 @@ class AIMOSEnvironment(SLURMEnvironment):
         return True
     
 def main(args):
+    # Calculate effective learning rate from the args passed
+    
+    # THIS ASSUMES PL has exposed its flags
+    effective_batch_size = int(args.batch_size) * int(args.devices) * int(args.num_nodes)
+    effective_lr = float(args.lr) / 256 * effective_batch_size
+    args.lr = effective_lr
     litmodel = LitTimm(args)
-    trainer = pl.Trainer.from_argparse_args(args, limit_train_batches=1000, limit_val_batches=10, val_check_interval=500, gradient_clip_val=0.5)
-    trainer.fit(litmodel)
+    default_root_dir = os.path.join(args.exp_dir, args.exp_name)
+    ckpt_dir = os.path.join(default_root_dir, "checkpoints")
+    last_ckpt_path = os.path.join(ckpt_dir, "last.ckpt")
+    if os.path.exists(last_ckpt_path):
+        resume_from_checkpoint=last_ckpt_path
+    else:
+        resume_from_checkpoint = None
+
+    logger = TensorBoardLogger(args.exp_dir, name=args.exp_name)
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=ckpt_dir,
+        save_top_k=3, 
+        monitor="val_acc1",
+        mode="max", 
+        save_last=True,
+    )
+    progress_bar = TQDMProgressBar(refresh_rate=args.progress_bar_refresh_rate)
+    print("Resume from ckpt? ", resume_from_checkpoint)
+    trainer = pl.Trainer.from_argparse_args(args, default_root_dir=default_root_dir, logger=logger, callbacks=[checkpoint_callback, progress_bar])
+    trainer.fit(litmodel, ckpt_path=resume_from_checkpoint)
     print("Done")
         
 if __name__ == "__main__":
