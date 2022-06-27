@@ -73,10 +73,14 @@ class ClassicalHopfield(nn.Module):
             nn.init.uniform_(self.bias_vis, -bound, bound)
 
     def forward(self, x):
+        """Defines the update step for the energy, (-dE/dg)
+        
+        Unfortunately, using biases makes this an imperfect calculation of dE/dg because of `bias_vis`, which should appropriately live elsewhere
+        """
         x = F.linear(x, self.weight, self.bias_hid)
         x = self.act(x)
         x = F.linear(x, self.weight.T, self.bias_vis)
-        return -x
+        return x
     
     def energy(self, x):
         hid = F.linear(x, self.weight, self.bias_hid)
@@ -84,7 +88,8 @@ class ClassicalHopfield(nn.Module):
 
 class HopfieldMLP(nn.Module):
     """ A lite wrapper around `SymmetricMLP` to make it compatible with existing ViT code"""
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.ReLU, bias=False):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.ReLU, bias=False, drop=None):
+        # Drop included for compatibility, not implemented
         super().__init__()
         self.mlp = ClassicalHopfield(in_features, hidden_features=hidden_features, act_layer=act_layer, bias=bias)
         out_features = out_features or in_features
@@ -100,9 +105,11 @@ class HopfieldMLP(nn.Module):
 class KQAlignedAttention(nn.Module):
     """Attention modified s.t. the vectors are particles, whose query and key are trying to align    
 
-    Given the "headmix" projection and the correct type of layer norm, this is perfectly energy aligned
+    Given the "headmix" projection and the correct type of layer norm, this is perfectly energy aligned.
+    
+    The new attention operation, without a projection matrix
     """
-    def __init__(self, dim, num_heads=8, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, *, proj_drop=None, proj_bias=None, attn_drop=False):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads if head_dim is None else head_dim
@@ -113,11 +120,14 @@ class KQAlignedAttention(nn.Module):
         self.k_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
         
     def forward(self, x):
-        """`x` is going to serve as self attention to itself"""
+        """`x` is going to serve as self attention to itself
+        
+        Defines the update step for the energy, (-dE/dg)
+        """
         Q = self.q_proj(x) # B Nq Z
         K = self.k_proj(x) # B Nk Z
-        Q = rearrange(Q, "b q (h z) -> b h q z", h=self.num_heads, z=self.head_dim)
-        K = rearrange(K, "b k (h z) -> b h k z", h=self.num_heads, z=self.head_dim)
+        Q = rearrange(Q, "... q (h z) -> ... h q z", h=self.num_heads, z=self.head_dim)
+        K = rearrange(K, "... k (h z) -> ... h k z", h=self.num_heads, z=self.head_dim)
         
         Wq = rearrange(self.q_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
         Wk = rearrange(self.k_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
@@ -127,19 +137,20 @@ class KQAlignedAttention(nn.Module):
 
         # Calculate the attention
         attn = (torch.einsum("bhqk,h->bhqk", Q @ K.transpose(-2, -1), self.betas)).softmax(dim=-1) # (B, H, Nq, Nk)
-        T1 = -torch.einsum("bkhd,bhqk->bqd", F1, attn)
-        T2 = -torch.einsum("bqhd,bhqk->bkd", F2, attn)
+        T1 = torch.einsum("bkhd,bhqk->bqd", F1, attn)
+        T2 = torch.einsum("bqhd,bhqk->bkd", F2, attn)
         return T1+T2
     
     def energy(self, x):
+        """Return the (negative of) the energy. The sign is flipped from the normal energy function for backwards compatibility with expected behavior of the forward attention operation"""
         Q = self.q_proj(x) # B Nq Z
         K = self.k_proj(x) # B Nk Z
-        Q = rearrange(Q, "b q (h z) -> b q h z", h=self.num_heads, z=self.head_dim)
-        K = rearrange(K, "b k (h z) -> b k h z", h=self.num_heads, z=self.head_dim)
+        Q = rearrange(Q, "... q (h z) -> ... q h z", h=self.num_heads, z=self.head_dim)
+        K = rearrange(K, "... k (h z) -> ... k h z", h=self.num_heads, z=self.head_dim)
         
         preatt = torch.einsum("h,bqhz,bkhz->bhqk",self.betas, Q, K)
         postatt = torch.logsumexp(preatt, dim=-1).sum(-1) # batch, heads
-        return torch.einsum("bh,h->b", postatt, -1/self.betas)
+        return -torch.einsum("bh,h->b", postatt, 1/self.betas)
     
 class EnergyLayerNorm(nn.Module):
     def __init__(self, normalized_shape: Union[int, List[int], torch.Size], eps: float=1e-5, train_scale=True, train_bias=True, device=None, dtype=None):
@@ -182,7 +193,7 @@ class KQEnergyBlock(nn.Module):
         self.attn = KQAlignedAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias)
         self.chn = HopfieldMLP(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer)
 
-    def forward(self, g, alpha=0.1):
+    def forward(self, g):
         return self.attn(g) + self.chn(g)
 
     def energy(self, g):
