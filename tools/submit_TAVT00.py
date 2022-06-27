@@ -13,7 +13,8 @@ model_names = [
     "tavt_base0",
     "tavt_base0_nobias",
     "tavt_base0_alpha",
-    "tavt_base0_alpha_nobias"
+    "tavt_base0_alpha_nobias",
+    "tavt_noproj",
 ]
 
 for mname in model_names:
