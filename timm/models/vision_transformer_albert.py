@@ -34,6 +34,7 @@ def _cfg(url='', **kwargs):
 
 default_cfgs = {
     'avt_base_patch16_224': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_noproj': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_nobias': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_relu': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_symmlp': _cfg(url='', input_size=(3, 224, 224)),
@@ -48,7 +49,7 @@ default_cfgs = {
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., proj_bias=True):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., proj_bias=True, use_proj=True):
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
@@ -57,8 +58,10 @@ class Attention(nn.Module):
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim, bias=proj_bias)
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.use_proj = use_proj
+        if use_proj:
+            self.proj = nn.Linear(dim, dim, bias=proj_bias)
+            self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
         B, N, C = x.shape
@@ -70,19 +73,20 @@ class Attention(nn.Module):
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
+        if self.use_proj:
+            x = self.proj(x)
+            x = self.proj_drop(x)
         return x
 
 
 class Block(nn.Module):
     def __init__(
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, alpha=1.):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1.):
         super().__init__()
         self.alpha = alpha
         self.norm1 = norm_layer(dim)
-        self.attn = attn_fn(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias)
+        self.attn = attn_fn(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj)
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -144,7 +148,7 @@ class AlbertVisionTransformer(nn.Module):
             self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, global_pool='token',
             embed_dim=768, depth=12, num_heads=12, mlp_ratio=4., qkv_bias=True, mlp_bias=True, proj_bias=True, init_values=None,
             class_token=True, fc_norm=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., weight_init='',
-            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1.):
+            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True):
         """
         Args:
             img_size (int, tuple): input image size
@@ -191,7 +195,7 @@ class AlbertVisionTransformer(nn.Module):
 
         block = block_fn(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, mlp_bias=mlp_bias, proj_bias=proj_bias, init_values=init_values,
-                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha)
+                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj)
         self.blocks = RepeatedSequential(block, depth)
         self.norm = norm_layer(embed_dim) if not use_fc_norm else nn.Identity()
 
@@ -294,6 +298,13 @@ def tavt_nobias(pretrained=False, **kwargs):
     """ No biases in any of the major linear operations. LayerNorm stuff can still have biases"""
     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, **kwargs)
     model = _create_albert_vision_transformer('tavt_nobias', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_noproj(pretrained=False, **kwargs):
+    """ No biases in any of the major linear operations. LayerNorm stuff can still have biases"""
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, **kwargs)
+    model = _create_albert_vision_transformer('tavt_noproj', pretrained=pretrained, **model_kwargs)
     return model
 
 @register_model

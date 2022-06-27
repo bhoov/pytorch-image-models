@@ -109,7 +109,7 @@ class KQAlignedAttention(nn.Module):
     
     The new attention operation, without a projection matrix
     """
-    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, *, proj_drop=None, proj_bias=None, attn_drop=False):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, *, proj_drop=None, proj_bias=None, attn_drop=False, use_proj=False):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads if head_dim is None else head_dim
@@ -118,6 +118,7 @@ class KQAlignedAttention(nn.Module):
         
         self.q_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
         self.k_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
+        # self.use_proj = use_proj # Not implemented
         
     def forward(self, x):
         """`x` is going to serve as self attention to itself
