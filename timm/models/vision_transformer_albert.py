@@ -43,7 +43,7 @@ default_cfgs = {
     'tavt_base0': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_base0_nobias': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_base0_alpha': _cfg(url='', input_size=(3, 224, 224)),
-    'tavt_base0_alpha_no bias': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_base0_alpha_nobias': _cfg(url='', input_size=(3, 224, 224)),
 }
 
 
@@ -73,16 +73,6 @@ class Attention(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
-
-
-# class LayerScale(nn.Module):
-#     def __init__(self, dim, init_values=1e-5, inplace=False):
-#         super().__init__()
-#         self.inplace = inplace
-#         self.gamma = nn.Parameter(init_values * torch.ones(dim))
-
-#     def forward(self, x):
-#         return x.mul_(self.gamma) if self.inplace else x * self.gamma
 
 
 class Block(nn.Module):
