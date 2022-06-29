@@ -109,17 +109,27 @@ class KQAlignedAttention(nn.Module):
     
     The new attention operation, without a projection matrix
     """
-    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, *, proj_drop=None, proj_bias=None, attn_drop=False, use_proj=False):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, use_proj=False, proj_bias=True, **kwargs):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads if head_dim is None else head_dim
         self.betas = nn.Parameter(torch.ones(self.num_heads) * (self.head_dim ** -0.5), requires_grad=train_betas)
         zspace_dim = int(self.head_dim * num_heads)
+        self.do_headmixing = do_headmixing
+        self.use_proj = use_proj
+        self.do_weighted_sum = do_weighted_sum
         
         self.q_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
         self.k_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
         # self.use_proj = use_proj # Not implemented
         
+        if self.do_headmixing:
+            self.headmixer = nn.Linear(self.num_heads, self.num_heads, bias=False) # Just want the weight from this, but we don't define it as a standalone parameter so the normal initialization functions can work as desired.
+        if self.use_proj:
+            self.proj = nn.Linear(dim, dim, bias=proj_bias)
+        if self.do_weighted_sum:
+            self.weight_sum = nn.Parameter(torch.ones(self.num_heads))
+
     def forward(self, x):
         """`x` is going to serve as self attention to itself
         
@@ -138,9 +148,25 @@ class KQAlignedAttention(nn.Module):
 
         # Calculate the attention
         attn = (torch.einsum("bhqk,h->bhqk", Q @ K.transpose(-2, -1), self.betas)).softmax(dim=-1) # (B, H, Nq, Nk)
-        T1 = torch.einsum("bkhd,bhqk->bqd", F1, attn)
-        T2 = torch.einsum("bqhd,bhqk->bkd", F2, attn)
-        return T1+T2
+        T1 = torch.einsum("bkhd,bhqk->bqhd", F1, attn)
+        T2 = torch.einsum("bqhd,bhqk->bkhd", F2, attn)
+        x = T1 + T2
+        if self.do_headmixing:
+            W = self.headmixer.weight @ self.headmixer.weight.T
+            x = torch.einsum("bnhd,fh->bnfd", x, W)
+            
+        if self.use_proj:
+            W = self.proj.weight @ self.proj.weight.T
+            x = F.linear(x, W, self.proj.bias)
+            
+        if self.do_weighted_sum:
+            # Assume learnable weighted sum
+            W = self.weight_sum.clip(0.001, 10)
+            return torch.einsum("bnhd,h->bnd", x, W)
+        else:
+            # Assume weight_sum = ones
+            return x.sum(-2)
+
     
     def energy(self, x):
         """Return the (negative of) the energy. The sign is flipped from the normal energy function for backwards compatibility with expected behavior of the forward attention operation"""
