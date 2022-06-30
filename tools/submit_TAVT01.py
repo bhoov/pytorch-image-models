@@ -17,6 +17,8 @@ model_names = [
     "tavt_newatt_nobiases_hmix_proj",
     "tavt_newatt_nobiases_proj",
     "tavt_newatt_nobiases_weightsum",
+    "tavt_kqisvt1",
+    "tavt_kqisvt1_noproj",
 ]
 
 for mname in model_names:
