@@ -63,6 +63,10 @@ parser.add_argument('--dataset-download', action='store_true', default=False,
                     help='Allow download of dataset for torch/ and tfds/ datasets that support it.')
 parser.add_argument('--class-map', default='', type=str, metavar='FILENAME',
                     help='path to class to idx mapping file (default: "")')
+
+# Experiment parameters
+parser.add_argument("--exp_dir", type=str, default="lightning_logs", help="Where to save the tensorboard logs and checkpoints")
+parser.add_argument("--exp_name", type=str, default=None, help="Name of the experiment. If specified, will be a subfolder in the exp_dir")
                     
 # Model parameters
 parser.add_argument('--model', default='resnet50', type=str, metavar='MODEL',
@@ -285,13 +289,6 @@ parser.add_argument('--use-multi-epochs-loader', action='store_true', default=Fa
 parser.add_argument('--log-wandb', action='store_true', default=False,
                     help='log training and validation metrics to wandb');
 
-# NEW CUSTOM FLAGS
-# Experiment parameters
-parser.add_argument("--exp_dir", type=str, default="lightning_logs", help="Where to save the tensorboard logs and checkpoints")
-parser.add_argument("--exp_name", type=str, default=None, help="Name of the experiment. If specified, will be a subfolder in the exp_dir")
-parser.add_argument("--no_headweight_training", action="store_true", default=False, help="Do not train the weighted sum of the attention heads, if present.")
-
-
 parser = pl.Trainer.add_argparse_args(parser)
 
 def _parse_args(spec_args=None):
@@ -459,14 +456,8 @@ class LitTimm(pl.LightningModule):
     def configure_optimizers(self):
         # Might need to consider alphas here
         args = self.args
-        def filter_k(k):
-            c1 = "betas" not in k
-            if args.no_headweight_training:
-                c2 = "weight_sum" not in k
-                return c1 and c2
-            return c1
-        params = [v for k, v in self.model.named_parameters() if filter_k(k)]
-        optimizer = create_optimizer_v2(params, **optimizer_kwargs(cfg=args))
+        params = [v for k, v in self.model.named_parameters() if "betas" not in k]
+        optimizer = create_optimizer_v2(self.model, **optimizer_kwargs(cfg=args))
         lr_scheduler, num_epochs = create_scheduler(args, optimizer)
         
         self.second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order

@@ -61,6 +61,12 @@ default_cfgs = {
     'tavt_base0_nobias': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_base0_alpha': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_base0_alpha_nobias': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_weightsum_eneg3clip': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_weightsum_eneg4clip': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_weightsum_eneg5clip': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_weightsum_eneg3clipinit': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_weightsum_eneg4clipinit': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_weightsum_eneg5clipinit': _cfg(url='', input_size=(3, 224, 224)),
 }
 
 
@@ -147,11 +153,11 @@ class Attention(nn.Module):
 class Block(nn.Module):
     def __init__(
             self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1., vtype="normal", do_headmixing=False, do_weighted_sum=False):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1., vtype="normal", do_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1.):
         super().__init__()
         self.alpha = alpha
         self.norm1 = norm_layer(dim)
-        self.attn = attn_fn(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, do_weighted_sum=do_weighted_sum)
+        self.attn = attn_fn(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight)
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -212,7 +218,7 @@ class AlbertVisionTransformer(nn.Module):
             self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, global_pool='token',
             embed_dim=768, depth=12, num_heads=12, mlp_ratio=4., qkv_bias=True, mlp_bias=True, proj_bias=True, init_values=None,
             class_token=True, fc_norm=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., weight_init='',
-            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True, vtype="normal", do_headmixing=False, do_weighted_sum=False):
+            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True, vtype="normal", do_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1.):
         """
         Args:
             img_size (int, tuple): input image size
@@ -259,7 +265,7 @@ class AlbertVisionTransformer(nn.Module):
 
         block = block_fn(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, mlp_bias=mlp_bias, proj_bias=proj_bias, init_values=init_values,
-                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, do_weighted_sum=do_weighted_sum)
+                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight)
         self.blocks = RepeatedSequential(block, depth)
         self.norm = norm_layer(embed_dim) if not use_fc_norm else nn.Identity()
 
@@ -579,4 +585,67 @@ def tavt_base0_alpha_nobias(pretrained=False, **kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, act_layer=nn.ReLU, norm_layer=EnergyLayerNorm, mlp_fn=HopfieldMLP, attn_fn=KQAlignedAttention, block_fn=ParallelBlock, alpha=0.1)
     model_kwargs.update(kwargs)
     model = _create_albert_vision_transformer('tavt_base0_nobias', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+## ====================================
+## TAVT02 models, where we test initialization strategies
+## ====================================
+@register_model
+def tavt_newatt_weightsum_eneg3clip(pretrained=False, **kwargs):
+    """ Use our new Attention only, nobiases
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True, clip_headweight=1e-3)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg3clip', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_weightsum_eneg4clip(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True, clip_headweight=1e-4)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg4clip', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_weightsum_eneg5clip(pretrained=False, **kwargs):
+    """ Use our new Attention only, nobiases
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True, clip_headweight=1e-5)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg5clip', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_weightsum_eneg3clipinit(pretrained=False, **kwargs):
+    """ Use our new Attention only, nobiases
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True, clip_headweight=1e-3, init_headweight=1e-3)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg3clipinit', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
+def tavt_newatt_weightsum_eneg4clipinit(pretrained=False, **kwargs):
+    """ Use our new Attention only, nobiases
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True, clip_headweight=1e-4, init_headweight=1e-4)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg4clipinit', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_weightsum_eneg5clipinit(pretrained=False, **kwargs):
+    """ Use our new Attention only, nobiases
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True, clip_headweight=1e-5, init_headweight=1e-5)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg5clipinit', pretrained=pretrained, **model_kwargs)
     return model

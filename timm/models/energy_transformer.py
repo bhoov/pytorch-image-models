@@ -109,7 +109,7 @@ class KQAlignedAttention(nn.Module):
     
     The new attention operation, without a projection matrix
     """
-    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, use_proj=False, proj_bias=True, **kwargs):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, use_proj=False, proj_bias=True, clip_headweight=0.001, init_headweight=1., **kwargs):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads if head_dim is None else head_dim
@@ -118,6 +118,8 @@ class KQAlignedAttention(nn.Module):
         self.do_headmixing = do_headmixing
         self.use_proj = use_proj
         self.do_weighted_sum = do_weighted_sum
+        self.clip_headweight = clip_headweight
+        self.init_headweight = init_headweight
         
         self.q_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
         self.k_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
@@ -128,7 +130,7 @@ class KQAlignedAttention(nn.Module):
         if self.use_proj:
             self.proj = nn.Linear(dim, dim, bias=proj_bias)
         if self.do_weighted_sum:
-            self.weight_sum = nn.Parameter(torch.ones(self.num_heads))
+            self.weight_sum = nn.Parameter(torch.ones(self.num_heads) * self.init_headweight)
 
     def forward(self, x):
         """`x` is going to serve as self attention to itself
@@ -161,7 +163,7 @@ class KQAlignedAttention(nn.Module):
             
         if self.do_weighted_sum:
             # Assume learnable weighted sum
-            W = self.weight_sum.clip(0.001, 10)
+            W = self.weight_sum.clip(self.clip_headweight)
             return torch.einsum("bnhd,h->bnd", x, W)
         else:
             # Assume weight_sum = ones
