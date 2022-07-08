@@ -5,10 +5,11 @@ n_resubmit = 8
 base_log_dir = "/gpfs/u/home/DAMT/DAMThvrb/scratch/tb_logs/TAVT03"
 
 mnames = [
-    "tavt_newatt_nobiases_hmix_ortho",
-    "tavt_newatt_1head_nobiases",
-    "tavt_newatt_1head_nobiases_weightsum",
-    "tavt_newatt_1head_fulldim_nobiases_weightsum"
+    # "tavt_newatt_nobiases_hmix_ortho",
+    # "tavt_newatt_1head_nobiases",
+    # "tavt_newatt_1head_nobiases_weightsum",
+    # "tavt_newatt_1head_fulldim_nobiases_weightsum"
+    "tavt_newatt_nobiases_hmix_ortho2",
 ]
 
 for mname in mnames:

@@ -18,6 +18,8 @@ from .registry import register_model
 from .vision_transformer import VisionTransformer, get_init_weights_vit, LayerScale
 from .energy_transformer import HopfieldMLP, KQAlignedAttention, EnergyLayerNorm, KQEnergyBlock
 from einops import rearrange
+import torch.nn.utils.parametrize as parametrize
+
 
 _logger = logging.getLogger(__name__)
 
@@ -67,16 +69,21 @@ default_cfgs = {
     'tavt_newatt_weightsum_eneg3clipinit': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_newatt_weightsum_eneg4clipinit': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_newatt_weightsum_eneg5clipinit': _cfg(url='', input_size=(3, 224, 224)),
+    # 'tavt_newatt_nobiases_hmix_ortho': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_nobiases_hmix_ortho2': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_1head_nobiases': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_1head_nobiases_weightsum': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt_newatt_1head_fulldim_nobiases_weightsum': _cfg(url='', input_size=(3, 224, 224)),
 }
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., proj_bias=True, use_proj=True, vtype:Optional[str]=None, **kwargs):
+    def __init__(self, dim, num_heads=8, head_dim=None, qkv_bias=False, attn_drop=0., proj_drop=0., proj_bias=True, use_proj=True, vtype:Optional[str]=None, **kwargs):
         # kwargs used to keep this module interoperable with KQAlignedAttention
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
-        head_dim = dim // num_heads
+        head_dim = dim // num_heads if head_dim is None else head_dim
         self.head_dim = head_dim
         self.scale = head_dim ** -0.5
         
@@ -152,12 +159,12 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
     def __init__(
-            self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1., vtype="normal", do_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1.):
+            self, dim, num_heads, head_dim=None, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1., vtype="normal", do_headmixing=False, orthogonalize_headmixing=False, clip_headmixer_min=0.3, clip_headmixer_max=1., do_weighted_sum=False, clip_headweight=0.001, init_headweight=1.):
         super().__init__()
         self.alpha = alpha
         self.norm1 = norm_layer(dim)
-        self.attn = attn_fn(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight)
+        self.attn = attn_fn(dim, num_heads=num_heads, head_dim=head_dim, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, orthogonalize_headmixing=orthogonalize_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight, clip_headmixer_min=clip_headmixer_min, clip_headmixer_max=clip_headmixer_max)
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -216,9 +223,9 @@ class AlbertVisionTransformer(nn.Module):
 
     def __init__(
             self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, global_pool='token',
-            embed_dim=768, depth=12, num_heads=12, mlp_ratio=4., qkv_bias=True, mlp_bias=True, proj_bias=True, init_values=None,
+            embed_dim=768, depth=12, num_heads=12, head_dim=None, mlp_ratio=4., qkv_bias=True, mlp_bias=True, proj_bias=True, init_values=None,
             class_token=True, fc_norm=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., weight_init='',
-            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True, vtype="normal", do_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1.):
+            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True, vtype="normal", do_headmixing=False, orthogonalize_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1., clip_headmixer_min=0.3, clip_headmixer_max=1.):
         """
         Args:
             img_size (int, tuple): input image size
@@ -264,8 +271,8 @@ class AlbertVisionTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         block = block_fn(
-                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, mlp_bias=mlp_bias, proj_bias=proj_bias, init_values=init_values,
-                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight)
+                dim=embed_dim, num_heads=num_heads, head_dim=head_dim, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, mlp_bias=mlp_bias, proj_bias=proj_bias, init_values=init_values,
+                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, orthogonalize_headmixing=orthogonalize_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight, clip_headmixer_min=clip_headmixer_min, clip_headmixer_max=clip_headmixer_max)
         self.blocks = RepeatedSequential(block, depth)
         self.norm = norm_layer(embed_dim) if not use_fc_norm else nn.Identity()
 
@@ -337,8 +344,9 @@ class AlbertVisionTransformer(nn.Module):
         return x if pre_logits else self.head(x)
 
     def forward(self, x):
-        x = self.forward_features(x)
-        x = self.forward_head(x)
+        with parametrize.cached():
+            x = self.forward_features(x)
+            x = self.forward_head(x)
         return x
 
             
@@ -648,4 +656,55 @@ def tavt_newatt_weightsum_eneg5clipinit(pretrained=False, **kwargs):
     model_kwargs.update(kwargs)
     
     model = _create_albert_vision_transformer('tavt_newatt_weightsum_eneg5clipinit', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+## ====================================
+## TAVT03 models, where we try to make the architecture use >1 head
+## ====================================
+
+
+## Broken orthogonalization.. 
+# @register_model
+# def tavt_newatt_nobiases_hmix_ortho(pretrained=False, **kwargs):
+#     """ Use our new Attention with learnable projection matrix """
+#     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, do_headmixing=True, orthogonalize_headmixing=True, use_proj=False, attn_fn=KQAlignedAttention)
+#     model_kwargs.update(kwargs)
+
+#     model = _create_albert_vision_transformer('tavt_newatt_nobiases_hmix_ortho', pretrained=pretrained, **model_kwargs)
+#     return model
+
+@register_model
+def tavt_newatt_nobiases_hmix_ortho2(pretrained=False, **kwargs):
+    """ Use our new Attention with learnable projection matrix """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, qkv_bias=False, mlp_bias=False, proj_bias=False, do_headmixing=True, orthogonalize_headmixing=True, use_proj=False, attn_fn=KQAlignedAttention, clip_headmixer_min=0.3, clip_headmixer_max=1.)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt_newatt_nobiases_hmix_ortho2', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_1head_nobiases(pretrained=False, **kwargs):
+    """ Use our new Attention only
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=1, head_dim=64, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt_newatt_1head_nobiases', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_1head_nobiases_weightsum(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=1, head_dim=64, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_1head_nobiases_weightsum', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt_newatt_1head_fulldim_nobiases_weightsum(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=1, head_dim=768, qkv_bias=False, mlp_bias=False, proj_bias=False, use_proj=False, attn_fn=KQAlignedAttention, do_weighted_sum=True)
+    model_kwargs.update(kwargs)
+    
+    model = _create_albert_vision_transformer('tavt_newatt_1head_fulldim_nobiases_weightsum', pretrained=pretrained, **model_kwargs)
     return model

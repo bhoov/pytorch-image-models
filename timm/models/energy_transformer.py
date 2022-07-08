@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
+import torch.nn.utils.parametrize as parametrize
+
 from einops import rearrange
 
 
@@ -21,6 +23,7 @@ from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCE
 from .helpers import build_model_with_cfg, resolve_pretrained_cfg, named_apply, adapt_input_conv, checkpoint_seq
 from .layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_
 from .registry import register_model
+from timm.utils.parametrizations import OrthogonalParametrization, ScaledOrthogonalParametrization
 
 _logger = logging.getLogger(__name__)
 
@@ -109,13 +112,14 @@ class KQAlignedAttention(nn.Module):
     
     The new attention operation, without a projection matrix
     """
-    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, use_proj=False, proj_bias=True, clip_headweight=0.001, init_headweight=1., **kwargs):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, orthogonalize_headmixing=False, use_proj=False, proj_bias=True, clip_headweight=0.001, init_headweight=1., clip_headmixer_min=0.3, clip_headmixer_max=1., **kwargs):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = dim // num_heads if head_dim is None else head_dim
         self.betas = nn.Parameter(torch.ones(self.num_heads) * (self.head_dim ** -0.5), requires_grad=train_betas)
         zspace_dim = int(self.head_dim * num_heads)
         self.do_headmixing = do_headmixing
+        self.orthogonalize_headmixing = orthogonalize_headmixing
         self.use_proj = use_proj
         self.do_weighted_sum = do_weighted_sum
         self.clip_headweight = clip_headweight
@@ -126,7 +130,10 @@ class KQAlignedAttention(nn.Module):
         # self.use_proj = use_proj # Not implemented
         
         if self.do_headmixing:
-            self.headmixer = nn.Linear(self.num_heads, self.num_heads, bias=False) # Just want the weight from this, but we don't define it as a standalone parameter so the normal initialization functions can work as desired.
+            self.headmixer = nn.Linear(self.num_heads, self.num_heads, bias=False) 
+            if self.orthogonalize_headmixing:
+                parametrize.register_parametrization(self.headmixer, "weight", ScaledOrthogonalParametrization.from_weight(self.headmixer.weight, clip_headmixer_min, clip_headmixer_max))
+                
         if self.use_proj:
             self.proj = nn.Linear(dim, dim, bias=proj_bias)
         if self.do_weighted_sum:
@@ -154,8 +161,12 @@ class KQAlignedAttention(nn.Module):
         T2 = torch.einsum("bqhd,bhqk->bkhd", F2, attn)
         x = T1 + T2
         if self.do_headmixing:
-            W = self.headmixer.weight @ self.headmixer.weight.T
+            if not self.orthogonalize_headmixing:
+                W = self.headmixer.weight @ self.headmixer.weight.T
+            else:
+                W = self.headmixer.weight
             x = torch.einsum("bnhd,fh->bnfd", x, W)
+
             
         if self.use_proj:
             W = self.proj.weight @ self.proj.weight.T
