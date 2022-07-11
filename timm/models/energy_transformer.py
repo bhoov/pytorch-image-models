@@ -112,8 +112,15 @@ class KQAlignedAttention(nn.Module):
     
     The new attention operation, without a projection matrix
     """
-    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, orthogonalize_headmixing=False, use_proj=False, proj_bias=True, clip_headweight=0.001, init_headweight=1., clip_headmixer_min=0.3, clip_headmixer_max=1., **kwargs):
+    def __init__(self, dim, num_heads=12, qkv_bias=False, train_betas=False, head_dim:Optional[int]=None, do_headmixing=False, do_weighted_sum=False, orthogonalize_headmixing=False, use_proj=False, proj_bias=True, clip_headweight=0.001, init_headweight=1., clip_headmixer_min=0.3, clip_headmixer_max=1., simplification:Optional[str]=None, **kwargs):
+        """
+        Args:
+            simplification: One of ['use_k', 'use_q', 'use_wqk', 'use_wkq', None]. If None, do not simplify. Chooses which components of the manual gradient to use as the Value matrix
+            clip_headmixer_*: Only used if `orthogonalize_headmixing` is true. Clips the eigenvalues of this projection
+        """
         super().__init__()
+        assert simplification in set(['use_k', 'use_q', 'use_wqk', 'use_wkq', None])
+        self.simplification = simplification
         self.num_heads = num_heads
         self.head_dim = dim // num_heads if head_dim is None else head_dim
         self.betas = nn.Parameter(torch.ones(self.num_heads) * (self.head_dim ** -0.5), requires_grad=train_betas)
@@ -127,8 +134,7 @@ class KQAlignedAttention(nn.Module):
         
         self.q_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
         self.k_proj = nn.Linear(dim, zspace_dim, bias=qkv_bias)
-        # self.use_proj = use_proj # Not implemented
-        
+                
         if self.do_headmixing:
             self.headmixer = nn.Linear(self.num_heads, self.num_heads, bias=False) 
             if self.orthogonalize_headmixing:
@@ -149,36 +155,81 @@ class KQAlignedAttention(nn.Module):
         Q = rearrange(Q, "... q (h z) -> ... h q z", h=self.num_heads, z=self.head_dim)
         K = rearrange(K, "... k (h z) -> ... h k z", h=self.num_heads, z=self.head_dim)
         
-        Wq = rearrange(self.q_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
-        Wk = rearrange(self.k_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
-
-        F1 = torch.einsum("hzd,bhkz->bkhd", Wq, K)
-        F2 = torch.einsum("hzd,bhqz->bqhd", Wk, Q)
-
         # Calculate the attention
         attn = (torch.einsum("bhqk,h->bhqk", Q @ K.transpose(-2, -1), self.betas)).softmax(dim=-1) # (B, H, Nq, Nk)
-        T1 = torch.einsum("bkhd,bhqk->bqhd", F1, attn)
-        T2 = torch.einsum("bqhd,bhqk->bkhd", F2, attn)
-        x = T1 + T2
+        
         if self.do_headmixing:
             if not self.orthogonalize_headmixing:
-                W = self.headmixer.weight @ self.headmixer.weight.T
+                Wh = self.headmixer.weight @ self.headmixer.weight.T
             else:
-                W = self.headmixer.weight
-            x = torch.einsum("bnhd,fh->bnfd", x, W)
+                Wh = self.headmixer.weight
+                
+        if self.do_weighted_sum:
+            Wws = self.weight_sum.clip(self.clip_headweight)
+        
+        if self.simplification is None:
+            Wq = rearrange(self.q_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
+            Wk = rearrange(self.k_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
 
+            F1 = torch.einsum("hzd,bhkz->bkhd", Wq, K)
+            F2 = torch.einsum("hzd,bhqz->bqhd", Wk, Q)
+
+            T1 = torch.einsum("bkhd,bhqk->bqhd", F1, attn)
+            T2 = torch.einsum("bqhd,bhqk->bkhd", F2, attn)
+            x = T1 + T2
             
+            if self.do_headmixing:
+                x = torch.einsum("bnhd,fh->bnfd", x, Wh)      
+                
+            if self.do_weighted_sum:
+                x = torch.einsum("bnhd,h->bnhd", x, Wws)
+            
+        elif self.simplification == "use_wqk":
+            Wq = rearrange(self.q_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
+            F1 = torch.einsum("hzd,bhkz->bkhd", Wq, K)
+            T1 = torch.einsum("bkhd,bhqk->bqhd", F1, attn)
+            x = T1
+            
+            if self.do_headmixing:
+                x = torch.einsum("bnhd,fh->bnfd", x, Wh)
+            if self.do_weighted_sum:
+                x = torch.einsum("bnhd,h->bnhd", x, Wws)
+            
+        elif self.simplification == "use_wkq":
+            Wk = rearrange(self.k_proj.weight, "(h z) d -> h z d", h=self.num_heads, z=self.head_dim)
+            F2 = torch.einsum("hzd,bhqz->bqhd", Wk, Q)
+            T2 = torch.einsum("bqhd,bhqk->bkhd", F2, attn)
+            x = T2
+            
+            if self.do_headmixing:
+                x = torch.einsum("bnhd,fh->bnfd", x, Wh)
+            if self.do_weighted_sum:
+                x = torch.einsum("bnhd,h->bnhd", x, Wws)
+            
+        elif self.simplification == "use_k":
+            T = torch.einsum("bhkz,bhqk->bqhz", K, attn)
+            x = T
+            
+            if self.do_headmixing:
+                x = torch.einsum("bnhz,fh->bnfz", x, Wh)
+            if self.do_weighted_sum:
+                x = torch.einsum("bnhd,h->bnhd", x, Wws)
+            x = rearrange(x, "b q h z -> b q (h z)").unsqueeze(-2) # Effectively 1 head
+            
+        elif self.simplification == "use_q":
+            # Not particularly meaningful...
+            x = torch.einsum("bhqz,bhqk->bkhz", Q, attn)
+            if self.do_headmixing:
+                x = torch.einsum("bnhz,fh->bnfz", x, Wh)
+            if self.do_weighted_sum:
+                x = torch.einsum("bnhd,h->bnhd", x, Wws)
+            x = rearrange(x, "b k h z -> b k (h z)").unsqueeze(-2) # Effectively 1 head, of length D
+
         if self.use_proj:
             W = self.proj.weight @ self.proj.weight.T
             x = F.linear(x, W, self.proj.bias)
-            
-        if self.do_weighted_sum:
-            # Assume learnable weighted sum
-            W = self.weight_sum.clip(self.clip_headweight)
-            return torch.einsum("bnhd,h->bnd", x, W)
-        else:
-            # Assume weight_sum = ones
-            return x.sum(-2)
+
+        return x.sum(-2)
 
     
     def energy(self, x):

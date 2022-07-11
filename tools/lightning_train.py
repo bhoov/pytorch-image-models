@@ -290,6 +290,8 @@ parser.add_argument('--log-wandb', action='store_true', default=False,
 parser.add_argument("--exp_dir", type=str, default="lightning_logs", help="Where to save the tensorboard logs and checkpoints")
 parser.add_argument("--exp_name", type=str, default=None, help="Name of the experiment. If specified, will be a subfolder in the exp_dir")
 parser.add_argument("--no_headweight_training", action="store_true", default=False, help="Do not train the weighted sum of the attention heads, if present.")
+parser.add_argument("--num_heads", type=int, help="Number of heads in the model", default=None)
+parser.add_argument("--head_dim", type=int, help="Dimension of each head in the model", default=None)
 
 
 parser = pl.Trainer.add_argparse_args(parser)
@@ -332,6 +334,9 @@ def get_dataset_eval(args):
         class_map=args.class_map,
         download=args.dataset_download,
         batch_size=args.batch_size)
+    
+def xor(a,b):
+    return a != b
 
 class LitTimm(pl.LightningModule):
     """A simple wrapper around all the components of timm's train.py for classification"""
@@ -340,6 +345,15 @@ class LitTimm(pl.LightningModule):
         args, # Config args from timm
     ):
         super().__init__()
+        
+        assert not xor(args.num_heads is None, args.head_dim is None), "Either both None, or both given"
+        if args.num_heads is not None:
+            model_kwargs = {
+                "num_heads": args.num_heads,
+                "head_dim": args.head_dim
+            }
+        else:
+            model_kwargs = {}
         self.model = create_model(
             args.model,
             pretrained=args.pretrained,
@@ -352,7 +366,11 @@ class LitTimm(pl.LightningModule):
             bn_momentum=args.bn_momentum,
             bn_eps=args.bn_eps,
             scriptable=args.torchscript,
-            checkpoint_path=args.initial_checkpoint)
+            checkpoint_path=args.initial_checkpoint,
+            **model_kwargs
+        )
+        print("MODEL CHECK NHEADS: ", self.model.blocks.block.attn.num_heads)
+        print("MODEL CHECK HEADDIM: ", self.model.blocks.block.attn.head_dim)
         self.args = self.proc_args(args) # Call after model created
         # enable split bn (separate bn stats per batch-portion)
         if self.args.split_bn:

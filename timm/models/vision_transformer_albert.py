@@ -74,6 +74,18 @@ default_cfgs = {
     'tavt_newatt_1head_nobiases': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_newatt_1head_nobiases_weightsum': _cfg(url='', input_size=(3, 224, 224)),
     'tavt_newatt_1head_fulldim_nobiases_weightsum': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_usewqk': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_usewqk_hmix': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_usek': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_usek_hmix': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_useq': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_useq_hmix': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_usewkq': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_usewkq_hmix': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_base0_hmix':_cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_newatt_hmix_zdimX_Yheads': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_zdimX_Yheads': _cfg(url='', input_size=(3, 224, 224)),
+    'tavt04_base0_hmix_zdimX_Yheads': _cfg(url='', input_size=(3, 224, 224)),
 }
 
 
@@ -160,11 +172,11 @@ class Attention(nn.Module):
 class Block(nn.Module):
     def __init__(
             self, dim, num_heads, head_dim=None, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0., init_values=None,
-            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1., vtype="normal", do_headmixing=False, orthogonalize_headmixing=False, clip_headmixer_min=0.3, clip_headmixer_max=1., do_weighted_sum=False, clip_headweight=0.001, init_headweight=1.):
+            drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_bias=True, proj_bias=True, mlp_fn=Mlp, attn_fn=Attention, use_proj=True, alpha=1., vtype="normal", do_headmixing=False, orthogonalize_headmixing=False, clip_headmixer_min=0.3, clip_headmixer_max=1., do_weighted_sum=False, clip_headweight=0.001, init_headweight=1., simplification=None):
         super().__init__()
         self.alpha = alpha
         self.norm1 = norm_layer(dim)
-        self.attn = attn_fn(dim, num_heads=num_heads, head_dim=head_dim, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, orthogonalize_headmixing=orthogonalize_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight, clip_headmixer_min=clip_headmixer_min, clip_headmixer_max=clip_headmixer_max)
+        self.attn = attn_fn(dim, num_heads=num_heads, head_dim=head_dim, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, proj_bias=proj_bias, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, orthogonalize_headmixing=orthogonalize_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight, clip_headmixer_min=clip_headmixer_min, clip_headmixer_max=clip_headmixer_max, simplification=simplification)
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -225,7 +237,7 @@ class AlbertVisionTransformer(nn.Module):
             self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, global_pool='token',
             embed_dim=768, depth=12, num_heads=12, head_dim=None, mlp_ratio=4., qkv_bias=True, mlp_bias=True, proj_bias=True, init_values=None,
             class_token=True, fc_norm=None, drop_rate=0., attn_drop_rate=0., drop_path_rate=0., weight_init='',
-            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True, vtype="normal", do_headmixing=False, orthogonalize_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1., clip_headmixer_min=0.3, clip_headmixer_max=1.):
+            embed_layer=PatchEmbed, norm_layer=None, act_layer=None, block_fn=Block, mlp_fn=Mlp, attn_fn=Attention, alpha=1., use_proj=True, vtype="normal", do_headmixing=False, orthogonalize_headmixing=False, do_weighted_sum=False, clip_headweight=0.001, init_headweight=1., clip_headmixer_min=0.3, clip_headmixer_max=1., simplification=None):
         """
         Args:
             img_size (int, tuple): input image size
@@ -272,7 +284,7 @@ class AlbertVisionTransformer(nn.Module):
 
         block = block_fn(
                 dim=embed_dim, num_heads=num_heads, head_dim=head_dim, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, mlp_bias=mlp_bias, proj_bias=proj_bias, init_values=init_values,
-                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, orthogonalize_headmixing=orthogonalize_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight, clip_headmixer_min=clip_headmixer_min, clip_headmixer_max=clip_headmixer_max)
+                drop=drop_rate, attn_drop=attn_drop_rate, norm_layer=norm_layer, act_layer=act_layer, mlp_fn=mlp_fn, attn_fn=attn_fn, alpha=alpha, use_proj=use_proj, vtype=vtype, do_headmixing=do_headmixing, orthogonalize_headmixing=orthogonalize_headmixing, do_weighted_sum=do_weighted_sum, clip_headweight=clip_headweight, init_headweight=init_headweight, clip_headmixer_min=clip_headmixer_min, clip_headmixer_max=clip_headmixer_max, simplification=simplification)
         self.blocks = RepeatedSequential(block, depth)
         self.norm = norm_layer(embed_dim) if not use_fc_norm else nn.Identity()
 
@@ -707,4 +719,112 @@ def tavt_newatt_1head_fulldim_nobiases_weightsum(pretrained=False, **kwargs):
     model_kwargs.update(kwargs)
     
     model = _create_albert_vision_transformer('tavt_newatt_1head_fulldim_nobiases_weightsum', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+
+## ====================================
+## TAVT04 models, where we try best practices on our attention and try to reduce our attention
+## ====================================
+@register_model
+def tavt04_newatt_usewqk(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_wqk", attn_fn=KQAlignedAttention)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_usewqk', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_usewqk_hmix(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_wqk", attn_fn=KQAlignedAttention, do_headmixing=True, orthogonalize_headmixing=True)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_usewqk_hmix', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
+def tavt04_newatt_usek(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_k", attn_fn=KQAlignedAttention)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_usek', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_usek_hmix(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_k", attn_fn=KQAlignedAttention, do_headmixing=True, orthogonalize_headmixing=True)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_usek_hmix', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_useq(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_q", attn_fn=KQAlignedAttention)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_useq', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_useq_hmix(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_q", attn_fn=KQAlignedAttention, do_headmixing=True, orthogonalize_headmixing=True)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_useq_hmix', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_usewkq(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_wkq", attn_fn=KQAlignedAttention)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_usewkq', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_usewkq_hmix(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_wkq", attn_fn=KQAlignedAttention, do_headmixing=True, orthogonalize_headmixing=True)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_usewkq_hmix', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_base0_hmix(pretrained=False, **kwargs):
+    """ Use our new Attention with symmetric MLP, parallel blocks, the whole shebang without specifying step size
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, act_layer=nn.ReLU, norm_layer=EnergyLayerNorm, mlp_fn=HopfieldMLP, attn_fn=KQAlignedAttention, block_fn=ParallelBlock, do_headmixing=True, orthogonalize_headmixing=True)
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_base0_hmix', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
+def tavt04_zdimX_Yheads(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False)
+    assert "head_dim" in kwargs and "num_heads" in kwargs, "For this test we need additionally specified head_dim and num_heads to choose model architecture"
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_zdimX_Yheads', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_newatt_hmix_zdimX_Yheads(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, simplification="use_wkq", attn_fn=KQAlignedAttention, do_headmixing=True, orthogonalize_headmixing=True)
+    assert "head_dim" in kwargs and "num_heads" in kwargs, "For this test we need additionally specified head_dim and num_heads to choose model architecture"
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_newatt_hmix_zdimX_Yheads', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def tavt04_base0_hmix_zdimX_Yheads(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, use_proj=False, qkv_bias=False, mlp_bias=False, proj_bias=False, act_layer=nn.ReLU, norm_layer=EnergyLayerNorm, mlp_fn=HopfieldMLP, attn_fn=KQAlignedAttention, block_fn=ParallelBlock, do_headmixing=True, orthogonalize_headmixing=True)
+    assert "head_dim" in kwargs and "num_heads" in kwargs, "For this test we need additionally specified head_dim and num_heads to choose model architecture"
+    model_kwargs.update(kwargs)
+
+    model = _create_albert_vision_transformer('tavt04_base0_hmix_zdimX_Yheads', pretrained=pretrained, **model_kwargs)
     return model
